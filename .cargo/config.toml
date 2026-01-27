@@ -1,0 +1,22 @@
+# Cargo configuration for cross-compiling to Windows 32-bit
+
+# Default target for this project (WoW 1.12 is 32-bit)
+[build]
+target = "i686-pc-windows-gnu"
+
+# Target-specific settings for 32-bit Windows GNU
+[target.i686-pc-windows-gnu]
+linker = "i686-w64-mingw32-gcc"
+ar = "i686-w64-mingw32-ar"
+
+[profile.release]
+# Optimize for size and speed
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+# Strip symbols for smaller DLL
+strip = true
+
+[profile.dev]
+panic = "abort"

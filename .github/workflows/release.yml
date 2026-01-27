@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: i686-pc-windows-gnu
+
+      - name: Install MinGW-w64
+        run: sudo apt-get update && sudo apt-get install -y mingw-w64
+
+      - name: Build Release
+        run: cargo build --target i686-pc-windows-gnu --release
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ steps.get_version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          files: |
+            target/i686-pc-windows-gnu/release/interact.dll
+          body: |
+            ## interact-rs ${{ steps.get_version.outputs.VERSION }}
+            
+            Interact with nearest object keybind for World of Warcraft 1.12.1.5875 (Vanilla)
+            
+            ### Installation
+            1. Place `interact.dll` in your WoW game folder
+            2. Add `interact.dll` to `dlls.txt` (for VanillaFixes loader)
+            3. Launch the game
+            
+            ### Keybinding Setup
+            After loading, two new keybindings will be available in WoW's Key Bindings menu:
+            - **Interact** - Standard interaction
+            - **Interact (auto-loot)** - Interaction with auto-loot enabled
+            
+            ### Lua API
+            - `InteractNearest(autoloot)` - Interact with nearest valid object
+              - `autoloot = 0` - Normal interact
+              - `autoloot = 1` - Interact with auto-loot
+            
+            ### Priority Order
+            1. Lootable corpses
+            2. Game objects (chests, herbs, mining nodes)
+            3. Skinnable corpses
+            4. Alive NPCs
