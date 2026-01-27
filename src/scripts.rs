@@ -158,8 +158,8 @@ unsafe fn find_best_candidate(lua: &crate::lua::LuaApi, l: LuaState) -> Option<(
 
         let distance = player_pos.distance(&obj_pos);
 
-        // Check if within interaction range
-        if distance <= MAX_DISTANCE {
+        // Check if within interaction range and has line of sight
+        if distance <= MAX_DISTANCE && game::has_line_of_sight(&player_pos, &obj_pos) {
             match obj_type {
                 ObjectType::Unit => {
                     process_unit(
@@ -217,6 +217,10 @@ unsafe fn is_player_summoned(pointer: u32) -> bool {
 }
 
 /// Process a unit and update the appropriate candidate
+///
+/// Uses flag-based death detection (is_unit_dead) which is more reliable
+/// than just checking health == 0. This handles edge cases like feign death
+/// and units with unusual health states.
 unsafe fn process_unit(
     current: u32,
     guid: u64,
@@ -226,9 +230,7 @@ unsafe fn process_unit(
     skinnable: &mut Candidate,
     alive_unit: &mut Candidate,
 ) {
-    let health = game::get_unit_health(current);
-
-    if health == 0 {
+    if game::is_unit_dead(current) {
         // Dead unit - check lootable/skinnable
         let is_lootable = game::is_unit_lootable(current);
         let is_skinnable = game::is_unit_skinnable(current);
@@ -238,7 +240,7 @@ unsafe fn process_unit(
         } else if is_skinnable {
             skinnable.update(guid, current, obj_type, distance);
         }
-    } else if health > 0 {
+    } else {
         // Alive unit
         alive_unit.update(guid, current, obj_type, distance);
     }

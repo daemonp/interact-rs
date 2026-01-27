@@ -36,6 +36,11 @@ pub mod game {
 
     /// Pointer to visible objects manager
     pub const VISIBLE_OBJECTS: usize = 0x00B41414;
+
+    /// bool __fastcall CWorld_Intersect(const C3Vector* p1, const C3Vector* p2,
+    ///     int ignored, C3Vector* intersectPoint, float* distance, uint32_t queryFlags)
+    /// Used for line-of-sight checks. Flag 0x100111 is safe (0x100171 crashes in some dungeons).
+    pub const CWORLD_INTERSECT: usize = 0x00672170;
 }
 
 /// Lua C API Functions (__fastcall unless noted)
