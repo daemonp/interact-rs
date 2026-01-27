@@ -2,6 +2,10 @@
 //!
 //! These offsets are specific to the Vanilla client and are used for
 //! hooking game functions and calling Lua C API functions.
+//!
+//! Note: Some offsets differ from UnitXP Service Pack 3. Where different,
+//! we use the original Interact C implementation values. UnitXP alternatives
+//! are noted in comments for future reference.
 
 /// Bootstrap / Initialization Hooks
 pub mod bootstrap {
@@ -27,6 +31,7 @@ pub mod game {
     pub const RIGHT_CLICK_OBJECT: usize = 0x005F8660;
 
     /// void __stdcall SetTarget(uint64_t guid)
+    /// Note: UnitXP uses 0x489A40 for p_Target - may be different function
     pub const SET_TARGET: usize = 0x00493540;
 
     /// Pointer to visible objects manager
@@ -37,6 +42,7 @@ pub mod game {
 pub mod lua_api {
     pub const GETTOP: usize = 0x006F3070;
     pub const SETTOP: usize = 0x006F3080;
+    /// Note: UnitXP uses 0x6F3400 for lua_type
     pub const TYPE: usize = 0x006F3460;
     pub const ISNUMBER: usize = 0x006F34D0;
     pub const ISSTRING: usize = 0x006F3510;

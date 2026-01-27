@@ -1,6 +1,11 @@
 //! Game interface for WoW 1.12.1
 //!
 //! Provides functions to interact with game objects, units, and the game world.
+//!
+//! Note on unit position: We read directly from unit + 0x9B8/0x9BC/0x9C0.
+//! UnitXP uses an alternative approach via CMovement (unit + 0x118) + 0x10,
+//! which handles transport coordinates. Our direct method matches the
+//! original Interact C implementation.
 
 use crate::offsets;
 use std::collections::HashSet;
