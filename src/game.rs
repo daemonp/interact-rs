@@ -2,13 +2,7 @@
 //!
 //! Provides functions to interact with game objects, units, and the game world.
 //!
-//! ## Features
-//! - Flag-based death detection (more reliable than health == 0)
-//! - Line-of-sight filtering using CWorld_Intersect
-//! - Object iteration and property access
-//!
-//! ## Note on unit position
-//! We read directly from unit + 0x9B8/0x9BC/0x9C0.
+//! Note on unit position: We read directly from unit + 0x9B8/0x9BC/0x9C0.
 //! UnitXP uses an alternative approach via CMovement (unit + 0x118) + 0x10,
 //! which handles transport coordinates. Our direct method matches the
 //! original Interact C implementation.
@@ -91,20 +85,6 @@ pub fn get_blacklist() -> HashSet<u32> {
 type GetObjectPointerFn = unsafe extern "fastcall" fn(u64) -> u32;
 type SetTargetFn = unsafe extern "stdcall" fn(u64);
 type RightClickFn = unsafe extern "thiscall" fn(u32, i32);
-
-/// CWorld_Intersect function signature
-/// bool __fastcall (p1, p2, ignored, intersectPoint, distance, queryFlags)
-type CWorldIntersectFn = unsafe extern "fastcall" fn(
-    *const C3Vector,
-    *const C3Vector,
-    i32,
-    *mut C3Vector,
-    *mut f32,
-    u32,
-) -> bool;
-
-/// Safe intersection query flags (0x100171 crashes in some dungeons)
-const INTERSECT_FLAGS: u32 = 0x100111;
 
 // =============================================================================
 // Memory offset helpers
@@ -218,9 +198,6 @@ pub unsafe fn get_object_position(pointer: u32) -> C3Vector {
 }
 
 /// Get the health of a unit
-///
-/// Note: Currently unused but kept for potential future Lua functions.
-#[allow(dead_code)]
 #[inline]
 pub unsafe fn get_unit_health(unit: u32) -> i32 {
     let descriptor: u32 = read_offset(unit, 0x8);
@@ -241,25 +218,6 @@ pub unsafe fn is_unit_skinnable(unit: u32) -> bool {
     let descriptor: u32 = read_offset(unit, 0x8);
     let flags: i32 = read_offset(descriptor, 0xB8);
     (flags & 0x0400_0000) != 0
-}
-
-/// Check if a unit is dead using flag-based detection
-///
-/// This is more reliable than just checking health == 0.
-/// Uses both health check (at 0x58) and dynamic flags (at 0x224, bit 0x20).
-/// Based on UnitXP's vanilla1121_unitIsDead implementation.
-#[inline]
-pub unsafe fn is_unit_dead(unit: u32) -> bool {
-    let descriptor: u32 = read_offset(unit, 0x8);
-    if descriptor == 0 || (descriptor & 1) != 0 {
-        return false;
-    }
-
-    let health: i32 = read_offset(descriptor, 0x58);
-    let dynamic_flags: u32 = read_offset(descriptor, 0x224);
-
-    // Dead if health < 1 OR if the dead flag (0x20) is set
-    health < 1 || (dynamic_flags & 0x20) != 0
 }
 
 // =============================================================================
@@ -285,50 +243,6 @@ pub unsafe fn interact_unit(pointer: u32, autoloot: i32) {
 pub unsafe fn interact_object(pointer: u32, autoloot: i32) {
     let func: RightClickFn = transmute(offsets::game::RIGHT_CLICK_OBJECT);
     func(pointer, autoloot)
-}
-
-// =============================================================================
-// Line of Sight
-// =============================================================================
-
-/// Check if there is a clear line of sight between two points.
-///
-/// Uses CWorld_Intersect to detect obstacles (walls, terrain) between the
-/// positions. Returns true if the target is visible from the source.
-///
-/// The target position is raised by 2.1 yards to avoid ground-level clipping
-/// issues (matching UnitXP behavior).
-///
-/// Based on UnitXP's inSight.cpp implementation.
-pub unsafe fn has_line_of_sight(from: &C3Vector, to: &C3Vector) -> bool {
-    let func: CWorldIntersectFn = transmute(offsets::game::CWORLD_INTERSECT);
-
-    // Raise target position slightly to avoid ground clipping
-    let mut target = *to;
-    target.z += 2.1;
-
-    let mut intersect_point = C3Vector::default();
-    let mut distance: f32 = 1.0; // Must be initialized to 1.0
-
-    // Distance guard: CWorld_Intersect can crash with very large distances
-    const DISTANCE_GUARD: f32 = 150.0;
-    if from.distance(&target) > DISTANCE_GUARD {
-        return false; // Too far, assume no LOS
-    }
-
-    let intersects = func(
-        from,
-        &target,
-        0, // ignored parameter
-        &mut intersect_point,
-        &mut distance,
-        INTERSECT_FLAGS,
-    );
-
-    // No intersection = clear LOS
-    // Intersection with distance > 1.0 = obstacle is beyond target = clear LOS
-    // Intersection with distance 0.0-1.0 = obstacle between us and target = blocked
-    !intersects || distance < 0.0 || distance > 1.0
 }
 
 // =============================================================================
@@ -570,24 +484,5 @@ mod tests {
         assert!(!blacklist.contains(&179829));
         assert!(!blacklist.contains(&179832));
         assert!(!blacklist.contains(&u32::MAX));
-    }
-
-    // -------------------------------------------------------------------------
-    // Constants tests
-    // -------------------------------------------------------------------------
-
-    #[test]
-    fn test_intersect_flags_is_safe_value() {
-        // 0x100111 is the safe flag (0x100171 crashes in some dungeons)
-        assert_eq!(INTERSECT_FLAGS, 0x100111);
-    }
-
-    #[test]
-    fn test_dead_flag_bit() {
-        // The dead flag is bit 0x20 in dynamic flags at descriptor + 0x224
-        let dead_flag: u32 = 0x20;
-        assert_eq!(dead_flag, 32);
-        assert_eq!(dead_flag & 0x20, 0x20); // Bit is set
-        assert_eq!(0u32 & 0x20, 0); // Bit is not set
     }
 }
