@@ -259,3 +259,223 @@ pub unsafe fn register_functions() {
 
     debug_log!("Registered InteractNearest function");
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -------------------------------------------------------------------------
+    // Candidate tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_candidate_new_is_invalid() {
+        let c = Candidate::new();
+        assert!(!c.is_valid());
+        assert_eq!(c.obj_type, ObjectType::None);
+        assert_eq!(c.distance, INITIAL_DISTANCE);
+    }
+
+    #[test]
+    fn test_candidate_update_makes_valid() {
+        let mut c = Candidate::new();
+        c.update(123, 456, ObjectType::Unit, 3.0);
+
+        assert!(c.is_valid());
+        assert_eq!(c.guid, 123);
+        assert_eq!(c.pointer, 456);
+        assert_eq!(c.obj_type, ObjectType::Unit);
+        assert_eq!(c.distance, 3.0);
+    }
+
+    #[test]
+    fn test_candidate_update_closer_replaces() {
+        let mut c = Candidate::new();
+        c.update(100, 200, ObjectType::Unit, 5.0);
+        c.update(101, 201, ObjectType::Unit, 3.0);
+
+        // Should have the closer one
+        assert_eq!(c.guid, 101);
+        assert_eq!(c.pointer, 201);
+        assert_eq!(c.distance, 3.0);
+    }
+
+    #[test]
+    fn test_candidate_update_farther_ignored() {
+        let mut c = Candidate::new();
+        c.update(100, 200, ObjectType::Unit, 3.0);
+        c.update(101, 201, ObjectType::Unit, 5.0);
+
+        // Should still have the closer one
+        assert_eq!(c.guid, 100);
+        assert_eq!(c.pointer, 200);
+        assert_eq!(c.distance, 3.0);
+    }
+
+    #[test]
+    fn test_candidate_update_same_distance_ignored() {
+        let mut c = Candidate::new();
+        c.update(100, 200, ObjectType::Unit, 3.0);
+        c.update(101, 201, ObjectType::Unit, 3.0);
+
+        // First one should win (not strictly less than)
+        assert_eq!(c.guid, 100);
+        assert_eq!(c.pointer, 200);
+    }
+
+    #[test]
+    fn test_candidate_is_valid_check() {
+        let mut c = Candidate::new();
+        assert!(!c.is_valid());
+
+        c.obj_type = ObjectType::Unit;
+        assert!(c.is_valid());
+
+        c.obj_type = ObjectType::GameObject;
+        assert!(c.is_valid());
+
+        c.obj_type = ObjectType::None;
+        assert!(!c.is_valid());
+    }
+
+    // -------------------------------------------------------------------------
+    // Constants tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_max_distance_is_5_yards() {
+        assert_eq!(MAX_DISTANCE, 5.0);
+    }
+
+    #[test]
+    fn test_initial_distance_is_large() {
+        assert!(INITIAL_DISTANCE > MAX_DISTANCE);
+        assert_eq!(INITIAL_DISTANCE, 1000.0);
+    }
+
+    #[test]
+    fn test_error_message_null_terminated() {
+        assert!(ERR_USAGE.ends_with(&[0]));
+    }
+
+    // -------------------------------------------------------------------------
+    // Priority selection tests (simulated)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_priority_lootable_wins_over_all() {
+        let mut lootable = Candidate::new();
+        let mut gameobject = Candidate::new();
+        let mut skinnable = Candidate::new();
+        let mut alive = Candidate::new();
+
+        lootable.update(1, 100, ObjectType::Unit, 4.0);
+        gameobject.update(2, 200, ObjectType::GameObject, 2.0);
+        skinnable.update(3, 300, ObjectType::Unit, 1.0);
+        alive.update(4, 400, ObjectType::Unit, 0.5);
+
+        // Simulate priority selection
+        let winner = if lootable.is_valid() {
+            &lootable
+        } else if gameobject.is_valid() {
+            &gameobject
+        } else if skinnable.is_valid() {
+            &skinnable
+        } else {
+            &alive
+        };
+
+        assert_eq!(winner.guid, 1); // Lootable wins even though farther
+    }
+
+    #[test]
+    fn test_priority_gameobject_wins_over_skinnable_and_alive() {
+        let lootable = Candidate::new();
+        let mut gameobject = Candidate::new();
+        let mut skinnable = Candidate::new();
+        let mut alive = Candidate::new();
+
+        // No lootable
+        gameobject.update(2, 200, ObjectType::GameObject, 4.0);
+        skinnable.update(3, 300, ObjectType::Unit, 2.0);
+        alive.update(4, 400, ObjectType::Unit, 1.0);
+
+        let winner = if lootable.is_valid() {
+            &lootable
+        } else if gameobject.is_valid() {
+            &gameobject
+        } else if skinnable.is_valid() {
+            &skinnable
+        } else {
+            &alive
+        };
+
+        assert_eq!(winner.guid, 2); // GameObject wins
+    }
+
+    #[test]
+    fn test_priority_skinnable_wins_over_alive() {
+        let lootable = Candidate::new();
+        let gameobject = Candidate::new();
+        let mut skinnable = Candidate::new();
+        let mut alive = Candidate::new();
+
+        // No lootable or gameobject
+        skinnable.update(3, 300, ObjectType::Unit, 4.0);
+        alive.update(4, 400, ObjectType::Unit, 1.0);
+
+        let winner = if lootable.is_valid() {
+            &lootable
+        } else if gameobject.is_valid() {
+            &gameobject
+        } else if skinnable.is_valid() {
+            &skinnable
+        } else {
+            &alive
+        };
+
+        assert_eq!(winner.guid, 3); // Skinnable wins
+    }
+
+    #[test]
+    fn test_priority_alive_is_last_resort() {
+        let lootable = Candidate::new();
+        let gameobject = Candidate::new();
+        let skinnable = Candidate::new();
+        let mut alive = Candidate::new();
+
+        // Only alive unit
+        alive.update(4, 400, ObjectType::Unit, 1.0);
+
+        let winner = if lootable.is_valid() {
+            &lootable
+        } else if gameobject.is_valid() {
+            &gameobject
+        } else if skinnable.is_valid() {
+            &skinnable
+        } else {
+            &alive
+        };
+
+        assert_eq!(winner.guid, 4);
+    }
+
+    #[test]
+    fn test_no_candidates_returns_none() {
+        let lootable = Candidate::new();
+        let gameobject = Candidate::new();
+        let skinnable = Candidate::new();
+        let alive = Candidate::new();
+
+        let has_winner = lootable.is_valid()
+            || gameobject.is_valid()
+            || skinnable.is_valid()
+            || alive.is_valid();
+
+        assert!(!has_winner);
+    }
+}

@@ -239,3 +239,245 @@ pub unsafe fn interact_object(pointer: u32, autoloot: i32) {
     let func: RightClickFn = transmute(offsets::game::RIGHT_CLICK_OBJECT);
     func(pointer, autoloot)
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -------------------------------------------------------------------------
+    // C3Vector tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_c3vector_distance_same_point() {
+        let a = C3Vector {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+        let b = C3Vector {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+        assert!((a.distance(&b) - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_c3vector_distance_unit_x() {
+        let a = C3Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let b = C3Vector {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        assert!((a.distance(&b) - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_c3vector_distance_unit_y() {
+        let a = C3Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let b = C3Vector {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        };
+        assert!((a.distance(&b) - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_c3vector_distance_unit_z() {
+        let a = C3Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let b = C3Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        };
+        assert!((a.distance(&b) - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_c3vector_distance_3d() {
+        // 3-4-5 triangle in 3D: sqrt(3^2 + 4^2 + 0^2) = 5
+        let a = C3Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let b = C3Vector {
+            x: 3.0,
+            y: 4.0,
+            z: 0.0,
+        };
+        assert!((a.distance(&b) - 5.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_c3vector_distance_3d_diagonal() {
+        // sqrt(1^2 + 1^2 + 1^2) = sqrt(3) ≈ 1.732
+        let a = C3Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let b = C3Vector {
+            x: 1.0,
+            y: 1.0,
+            z: 1.0,
+        };
+        let expected = 3.0_f32.sqrt();
+        assert!((a.distance(&b) - expected).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_c3vector_distance_symmetric() {
+        let a = C3Vector {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+        let b = C3Vector {
+            x: 4.0,
+            y: 6.0,
+            z: 8.0,
+        };
+        assert!((a.distance(&b) - b.distance(&a)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_c3vector_distance_negative_coords() {
+        let a = C3Vector {
+            x: -1.0,
+            y: -1.0,
+            z: -1.0,
+        };
+        let b = C3Vector {
+            x: 1.0,
+            y: 1.0,
+            z: 1.0,
+        };
+        // Distance should be sqrt(4 + 4 + 4) = sqrt(12) ≈ 3.464
+        let expected = 12.0_f32.sqrt();
+        assert!((a.distance(&b) - expected).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_c3vector_distance_within_5_yards() {
+        let player = C3Vector {
+            x: 100.0,
+            y: 200.0,
+            z: 50.0,
+        };
+        let nearby = C3Vector {
+            x: 103.0,
+            y: 204.0,
+            z: 50.0,
+        };
+        // Distance = sqrt(9 + 16 + 0) = 5.0 exactly
+        assert!(player.distance(&nearby) <= 5.0);
+    }
+
+    #[test]
+    fn test_c3vector_distance_beyond_5_yards() {
+        let player = C3Vector {
+            x: 100.0,
+            y: 200.0,
+            z: 50.0,
+        };
+        let far = C3Vector {
+            x: 106.0,
+            y: 200.0,
+            z: 50.0,
+        };
+        // Distance = 6.0
+        assert!(player.distance(&far) > 5.0);
+    }
+
+    #[test]
+    fn test_c3vector_default() {
+        let v = C3Vector::default();
+        assert_eq!(v.x, 0.0);
+        assert_eq!(v.y, 0.0);
+        assert_eq!(v.z, 0.0);
+    }
+
+    // -------------------------------------------------------------------------
+    // ObjectType tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_object_type_from_valid_values() {
+        assert_eq!(ObjectType::from(0), ObjectType::None);
+        assert_eq!(ObjectType::from(1), ObjectType::Item);
+        assert_eq!(ObjectType::from(2), ObjectType::Container);
+        assert_eq!(ObjectType::from(3), ObjectType::Unit);
+        assert_eq!(ObjectType::from(4), ObjectType::Player);
+        assert_eq!(ObjectType::from(5), ObjectType::GameObject);
+        assert_eq!(ObjectType::from(6), ObjectType::DynamicObject);
+        assert_eq!(ObjectType::from(7), ObjectType::Corpse);
+    }
+
+    #[test]
+    fn test_object_type_from_invalid_values() {
+        assert_eq!(ObjectType::from(8), ObjectType::None);
+        assert_eq!(ObjectType::from(100), ObjectType::None);
+        assert_eq!(ObjectType::from(u32::MAX), ObjectType::None);
+    }
+
+    #[test]
+    fn test_object_type_default() {
+        assert_eq!(ObjectType::default(), ObjectType::None);
+    }
+
+    #[test]
+    fn test_object_type_equality() {
+        assert_eq!(ObjectType::Unit, ObjectType::Unit);
+        assert_ne!(ObjectType::Unit, ObjectType::Player);
+        assert_ne!(ObjectType::GameObject, ObjectType::None);
+    }
+
+    // -------------------------------------------------------------------------
+    // Blacklist tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_blacklist_contains_expected_ids() {
+        let blacklist = get_blacklist();
+        assert!(blacklist.contains(&179830));
+        assert!(blacklist.contains(&179831));
+        assert!(blacklist.contains(&179785));
+        assert!(blacklist.contains(&179786));
+    }
+
+    #[test]
+    fn test_blacklist_size() {
+        let blacklist = get_blacklist();
+        assert_eq!(blacklist.len(), 4);
+    }
+
+    #[test]
+    fn test_blacklist_does_not_contain_other_ids() {
+        let blacklist = get_blacklist();
+        assert!(!blacklist.contains(&0));
+        assert!(!blacklist.contains(&1));
+        assert!(!blacklist.contains(&179829));
+        assert!(!blacklist.contains(&179832));
+        assert!(!blacklist.contains(&u32::MAX));
+    }
+}
