@@ -5,13 +5,13 @@
 
 use crate::game::{self, ObjectType};
 use crate::lua::{self, LuaState};
-use std::ffi::{c_char, c_int, c_void};
+use std::ffi::{c_int, c_void};
 
 // =============================================================================
 // Error Messages (null-terminated for C)
 // =============================================================================
 
-const ERR_USAGE: &[u8] = b"Usage: InteractNearest(autoloot)\0";
+const ERR_USAGE: &std::ffi::CStr = c"Usage: InteractNearest(autoloot)";
 
 // =============================================================================
 // Constants
@@ -90,7 +90,7 @@ pub unsafe extern "fastcall" fn Script_InteractNearest(_lua_state: LuaState) -> 
 
     // Validate arguments
     if !lua.isnumber(l, 1) {
-        lua.error(l, ERR_USAGE.as_ptr() as *const c_char);
+        lua.error(l, ERR_USAGE.as_ptr());
     }
 
     // Find the best candidate
@@ -129,8 +129,7 @@ unsafe fn find_best_candidate(lua: &crate::lua::LuaApi, l: LuaState) -> Option<(
     let mut skinnable = Candidate::new();
     let mut alive_unit = Candidate::new();
 
-    // Get blacklist (static would be better, but matching C behavior)
-    let blacklist = game::get_blacklist();
+    // Blacklist is now lazily initialized - no allocation per call
 
     // Iterate through all visible objects
     let mut current = game::get_first_object(objects);
@@ -174,7 +173,7 @@ unsafe fn find_best_candidate(lua: &crate::lua::LuaApi, l: LuaState) -> Option<(
                 }
                 ObjectType::GameObject => {
                     let id = game::get_gameobject_id(pointer);
-                    if !blacklist.contains(&id) {
+                    if !game::is_blacklisted(id) {
                         gameobject.update(guid, pointer, obj_type, distance);
                     }
                 }
@@ -253,7 +252,7 @@ pub unsafe fn register_functions() {
     let lua = lua::api();
 
     lua.register_function(
-        b"InteractNearest\0".as_ptr() as *const c_char,
+        c"InteractNearest".as_ptr(),
         Script_InteractNearest as *const c_void,
     );
 
@@ -358,8 +357,10 @@ mod tests {
     }
 
     #[test]
-    fn test_error_message_null_terminated() {
-        assert!(ERR_USAGE.ends_with(&[0]));
+    fn test_error_message_is_valid_cstr() {
+        // CStr is guaranteed to be null-terminated, so we just verify it's valid
+        assert!(!ERR_USAGE.to_bytes().is_empty());
+        assert!(ERR_USAGE.to_str().is_ok());
     }
 
     // -------------------------------------------------------------------------

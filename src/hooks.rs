@@ -4,6 +4,7 @@
 //! - Bootstrap initialization
 //! - Lua function registration
 
+use crate::errors::HookError;
 use crate::{lua, offsets, scripts};
 use retour::static_detour;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -98,13 +99,19 @@ fn load_script_functions_detour() {
 // =============================================================================
 
 /// Initialize all secondary hooks (called from SysMsgInit hook)
-unsafe fn init_all_hooks() -> Result<(), Box<dyn std::error::Error>> {
+unsafe fn init_all_hooks() -> Result<(), HookError> {
     // Hook LoadScriptFunctions
     let load_script_functions: LoadScriptFunctionsFn =
         std::mem::transmute(offsets::bootstrap::LOAD_SCRIPT_FUNCTIONS);
+
     LoadScriptFunctionsHook
-        .initialize(load_script_functions, load_script_functions_detour)?
-        .enable()?;
+        .initialize(load_script_functions, load_script_functions_detour)
+        .map_err(|e| HookError::InitFailed {
+            addr: offsets::bootstrap::LOAD_SCRIPT_FUNCTIONS,
+            message: e.to_string(),
+        })?
+        .enable()
+        .map_err(|e| HookError::EnableFailed(e.to_string()))?;
 
     Ok(())
 }
@@ -113,14 +120,19 @@ unsafe fn init_all_hooks() -> Result<(), Box<dyn std::error::Error>> {
 ///
 /// # Safety
 /// Must be called from DllMain during DLL_PROCESS_ATTACH
-pub unsafe fn load() -> Result<(), Box<dyn std::error::Error>> {
+pub unsafe fn load() -> Result<(), HookError> {
     // Hook SysMsgInitialize as bootstrap
     let sys_msg_init: SysMsgInitializeFn =
         std::mem::transmute(offsets::bootstrap::SYS_MSG_INITIALIZE);
 
     SysMsgInitHook
-        .initialize(sys_msg_init, sys_msg_init_detour)?
-        .enable()?;
+        .initialize(sys_msg_init, sys_msg_init_detour)
+        .map_err(|e| HookError::InitFailed {
+            addr: offsets::bootstrap::SYS_MSG_INITIALIZE,
+            message: e.to_string(),
+        })?
+        .enable()
+        .map_err(|e| HookError::EnableFailed(e.to_string()))?;
 
     Ok(())
 }

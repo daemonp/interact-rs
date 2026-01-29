@@ -101,13 +101,13 @@ impl LuaApi {
     /// Set the stack top to the given index
     #[inline]
     pub unsafe fn settop(&self, l: LuaState, idx: i32) {
-        (self.settop)(l, idx)
+        (self.settop)(l, idx);
     }
 
     /// Pop n elements from the stack
     #[inline]
     pub unsafe fn pop(&self, l: LuaState, n: i32) {
-        self.settop(l, -n - 1)
+        self.settop(l, -n - 1);
     }
 
     /// Get the type of the value at the given index
@@ -153,25 +153,25 @@ impl LuaApi {
     /// Push a number onto the stack
     #[inline]
     pub unsafe fn pushnumber(&self, l: LuaState, n: f64) {
-        (self.pushnumber)(l, n)
+        (self.pushnumber)(l, n);
     }
 
     /// Push a string onto the stack
     #[inline]
     pub unsafe fn pushstring(&self, l: LuaState, s: *const c_char) {
-        (self.pushstring)(l, s)
+        (self.pushstring)(l, s);
     }
 
     /// Push nil onto the stack
     #[inline]
     pub unsafe fn pushnil(&self, l: LuaState) {
-        (self.pushnil)(l)
+        (self.pushnil)(l);
     }
 
     /// Push a boolean onto the stack
     #[inline]
     pub unsafe fn pushboolean(&self, l: LuaState, b: bool) {
-        (self.pushboolean)(l, if b { 1 } else { 0 })
+        (self.pushboolean)(l, i32::from(b));
     }
 
     /// Raise a Lua error with a message
@@ -185,17 +185,33 @@ impl LuaApi {
 
     /// Register a new global Lua function
     pub unsafe fn register_function(&self, name: *const c_char, func: *const c_void) {
-        (self.register_function)(name, func)
+        (self.register_function)(name, func);
     }
 }
 
 // Global Lua API instance
+use crate::errors::LuaError;
 use once_cell::sync::OnceCell;
 static LUA_API: OnceCell<LuaApi> = OnceCell::new();
 
 /// Get the global Lua API instance
+///
+/// # Panics
+/// Panics if Lua API is not initialized. This should never happen
+/// after the DLL has been properly loaded and hooks installed.
 pub fn api() -> &'static LuaApi {
-    LUA_API.get().expect("Lua API not initialized")
+    LUA_API
+        .get()
+        .expect("Lua API not initialized - this is a bug in interact-rs")
+}
+
+/// Try to get the global Lua API instance
+///
+/// Returns `None` if the API hasn't been initialized yet.
+/// Prefer `api()` in normal code paths where initialization is guaranteed.
+#[allow(dead_code)] // Utility function for defensive code paths
+pub fn try_api() -> Result<&'static LuaApi, LuaError> {
+    LUA_API.get().ok_or(LuaError::NotInitialized)
 }
 
 /// Initialize the global Lua API instance

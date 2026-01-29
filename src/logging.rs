@@ -1,164 +1,164 @@
 //! Debug logging for interact-rs
 //!
 //! Writes logs to Logs\interact_debug.log
-//! Uses raw Windows API for maximum compatibility in DLL context.
+//! Uses the `windows` crate for type-safe Windows API bindings.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
+use windows::core::PCSTR;
+use windows::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+use windows::Win32::Storage::FileSystem::{
+    CreateDirectoryA, CreateFileA, DeleteFileA, FlushFileBuffers, MoveFileA, WriteFile,
+    CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ,
+};
+use windows::Win32::System::SystemInformation::GetLocalTime;
 
 // =============================================================================
 // File Handle Management
 // =============================================================================
 
-// Global file handle - using atomic for simple thread-safe storage
+/// Global file handle stored as atomic for thread-safe access
 static LOG_HANDLE: AtomicUsize = AtomicUsize::new(0);
 
-// Windows constants
-const INVALID_HANDLE_VALUE: usize = usize::MAX;
-const CREATE_ALWAYS: u32 = 2;
-const GENERIC_WRITE: u32 = 0x40000000;
-const FILE_SHARE_READ: u32 = 0x00000001;
-const FILE_ATTRIBUTE_NORMAL: u32 = 0x80;
-
-#[repr(C)]
-struct SystemTime {
-    year: u16,
-    month: u16,
-    day_of_week: u16,
-    day: u16,
-    hour: u16,
-    minute: u16,
-    second: u16,
-    milliseconds: u16,
+/// Convert atomic value to HANDLE
+fn handle_from_atomic(val: usize) -> HANDLE {
+    HANDLE(val as *mut std::ffi::c_void)
 }
 
-extern "system" {
-    fn CreateDirectoryA(path: *const i8, security: *mut std::ffi::c_void) -> i32;
-    fn CreateFileA(
-        filename: *const i8,
-        access: u32,
-        share_mode: u32,
-        security: *mut std::ffi::c_void,
-        creation: u32,
-        flags: u32,
-        template: *mut std::ffi::c_void,
-    ) -> usize;
-    fn WriteFile(
-        handle: usize,
-        buffer: *const u8,
-        len: u32,
-        written: *mut u32,
-        overlapped: *mut std::ffi::c_void,
-    ) -> i32;
-    fn FlushFileBuffers(handle: usize) -> i32;
-    fn CloseHandle(handle: usize) -> i32;
-    fn GetLocalTime(lp_system_time: *mut SystemTime);
-    fn DeleteFileA(filename: *const i8) -> i32;
-    fn MoveFileA(existing: *const i8, new: *const i8) -> i32;
+/// Convert HANDLE to atomic value
+fn handle_to_atomic(h: HANDLE) -> usize {
+    h.0 as usize
 }
+
+/// Check if a handle is valid
+fn is_valid_handle(val: usize) -> bool {
+    val != 0 && val != handle_to_atomic(INVALID_HANDLE_VALUE)
+}
+
+// =============================================================================
+// Log File Paths
+// =============================================================================
+
+const LOGS_DIR: &[u8] = b"Logs\0";
+const LOG_FILE: &[u8] = b"Logs\\interact_debug.log\0";
+const LOG_FILE_1: &[u8] = b"Logs\\interact_debug.log.1\0";
+const LOG_FILE_2: &[u8] = b"Logs\\interact_debug.log.2\0";
+const LOG_FILE_3: &[u8] = b"Logs\\interact_debug.log.3\0";
+
+// =============================================================================
+// Public API
+// =============================================================================
 
 /// Initialize the logging system
+///
+/// Creates the Logs directory if needed, rotates old log files,
+/// and opens a new log file for writing.
 pub fn init() {
-    // Don't reinitialize
+    // Don't reinitialize if already done
     let current = LOG_HANDLE.load(Ordering::SeqCst);
     if current != 0 {
         return;
     }
 
     unsafe {
-        // Create Logs directory
-        let logs_dir = b"Logs\0";
-        CreateDirectoryA(logs_dir.as_ptr() as *const i8, std::ptr::null_mut());
+        // Create Logs directory (ignore error if exists)
+        let _ = CreateDirectoryA(PCSTR::from_raw(LOGS_DIR.as_ptr()), None);
 
-        // Rotate old logs
-        let log3 = b"Logs\\interact_debug.log.3\0";
-        let log2 = b"Logs\\interact_debug.log.2\0";
-        let log1 = b"Logs\\interact_debug.log.1\0";
-        let log0 = b"Logs\\interact_debug.log\0";
-
-        DeleteFileA(log3.as_ptr() as *const i8);
-        MoveFileA(log2.as_ptr() as *const i8, log3.as_ptr() as *const i8);
-        MoveFileA(log1.as_ptr() as *const i8, log2.as_ptr() as *const i8);
-        MoveFileA(log0.as_ptr() as *const i8, log1.as_ptr() as *const i8);
+        // Rotate old logs: .3 -> delete, .2 -> .3, .1 -> .2, current -> .1
+        rotate_logs();
 
         // Open new log file
         let handle = CreateFileA(
-            log0.as_ptr() as *const i8,
-            GENERIC_WRITE,
+            PCSTR::from_raw(LOG_FILE.as_ptr()),
+            windows::Win32::Storage::FileSystem::FILE_GENERIC_WRITE.0,
             FILE_SHARE_READ,
-            std::ptr::null_mut(),
+            None,
             CREATE_ALWAYS,
             FILE_ATTRIBUTE_NORMAL,
-            std::ptr::null_mut(),
+            None,
         );
 
-        // Store handle if valid
-        if handle != 0 && handle as u32 != 0xFFFFFFFF {
-            LOG_HANDLE.store(handle, Ordering::SeqCst);
+        match handle {
+            Ok(h) if h != INVALID_HANDLE_VALUE => {
+                LOG_HANDLE.store(handle_to_atomic(h), Ordering::SeqCst);
 
-            // Write an immediate test message
-            let test_msg = b"[INIT] interact-rs logging initialized\r\n";
-            let mut written: u32 = 0;
-            WriteFile(
-                handle,
-                test_msg.as_ptr(),
-                test_msg.len() as u32,
-                &mut written,
-                std::ptr::null_mut(),
-            );
-            FlushFileBuffers(handle);
+                // Write initialization message
+                let init_msg = b"[INIT] interact-rs logging initialized\r\n";
+                let mut written: u32 = 0;
+                let _ = WriteFile(h, Some(init_msg), Some(&raw mut written), None);
+                let _ = FlushFileBuffers(h);
+            }
+            _ => {
+                // Failed to open log file - logging will be disabled
+            }
         }
     }
 }
 
 /// Write a log message with timestamp
-fn write_log(message: &str) {
-    let handle = LOG_HANDLE.load(Ordering::SeqCst);
-    if handle == 0 || handle == INVALID_HANDLE_VALUE {
+pub fn log_debug(message: &str) {
+    let handle_val = LOG_HANDLE.load(Ordering::SeqCst);
+    if !is_valid_handle(handle_val) {
         return;
     }
 
+    let handle = handle_from_atomic(handle_val);
     let timestamp = get_timestamp();
-    let line = format!("[{}] {}\r\n", timestamp, message);
+    let line = format!("[{timestamp}] {message}\r\n");
 
     unsafe {
         let mut written: u32 = 0;
-        WriteFile(
-            handle,
-            line.as_ptr(),
-            line.len() as u32,
-            &mut written,
-            std::ptr::null_mut(),
-        );
-        FlushFileBuffers(handle);
+        let _ = WriteFile(handle, Some(line.as_bytes()), Some(&raw mut written), None);
+        let _ = FlushFileBuffers(handle);
     }
 }
 
-/// Log a debug message
-pub fn log_debug(message: &str) {
-    write_log(message);
-}
-
-/// Shutdown logging
+/// Shutdown logging and close the file handle
 pub fn shutdown() {
-    let handle = LOG_HANDLE.swap(0, Ordering::SeqCst);
-    if handle != 0 && handle != INVALID_HANDLE_VALUE {
+    let handle_val = LOG_HANDLE.swap(0, Ordering::SeqCst);
+    if is_valid_handle(handle_val) {
         unsafe {
-            CloseHandle(handle);
+            let _ = CloseHandle(handle_from_atomic(handle_val));
         }
     }
 }
 
-/// Get a timestamp string
-fn get_timestamp() -> String {
-    unsafe {
-        let mut st: SystemTime = std::mem::zeroed();
-        GetLocalTime(&mut st);
-        format!(
-            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}",
-            st.year, st.month, st.day, st.hour, st.minute, st.second, st.milliseconds
-        )
-    }
+// =============================================================================
+// Internal Helpers
+// =============================================================================
+
+/// Rotate log files: delete .3, move .2->.3, .1->.2, current->.1
+unsafe fn rotate_logs() {
+    // Delete oldest log
+    let _ = DeleteFileA(PCSTR::from_raw(LOG_FILE_3.as_ptr()));
+
+    // Rotate remaining logs
+    let _ = MoveFileA(
+        PCSTR::from_raw(LOG_FILE_2.as_ptr()),
+        PCSTR::from_raw(LOG_FILE_3.as_ptr()),
+    );
+    let _ = MoveFileA(
+        PCSTR::from_raw(LOG_FILE_1.as_ptr()),
+        PCSTR::from_raw(LOG_FILE_2.as_ptr()),
+    );
+    let _ = MoveFileA(
+        PCSTR::from_raw(LOG_FILE.as_ptr()),
+        PCSTR::from_raw(LOG_FILE_1.as_ptr()),
+    );
 }
+
+/// Get a formatted timestamp string
+fn get_timestamp() -> String {
+    // GetLocalTime returns the SYSTEMTIME directly in the windows crate
+    let st = unsafe { GetLocalTime() };
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}",
+        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds
+    )
+}
+
+// =============================================================================
+// Logging Macro
+// =============================================================================
 
 /// Convenience macro for debug logging
 #[macro_export]

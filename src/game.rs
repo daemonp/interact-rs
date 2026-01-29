@@ -8,6 +8,7 @@
 //! original Interact C implementation.
 
 use crate::offsets;
+use once_cell::sync::Lazy;
 use std::collections::HashSet;
 use std::mem::transmute;
 
@@ -73,9 +74,19 @@ impl C3Vector {
 /// Blacklisted game object IDs that should not be auto-interacted with
 const BLACKLISTED_OBJECTS: &[u32] = &[179830, 179831, 179785, 179786];
 
-/// Get the set of blacklisted game object IDs
-pub fn get_blacklist() -> HashSet<u32> {
-    BLACKLISTED_OBJECTS.iter().copied().collect()
+/// Lazily initialized blacklist set - only created once
+static BLACKLIST: Lazy<HashSet<u32>> = Lazy::new(|| BLACKLISTED_OBJECTS.iter().copied().collect());
+
+/// Check if a game object ID is blacklisted
+#[inline]
+pub fn is_blacklisted(id: u32) -> bool {
+    BLACKLIST.contains(&id)
+}
+
+/// Get a reference to the blacklist set (for testing)
+#[cfg(test)]
+pub fn get_blacklist() -> &'static HashSet<u32> {
+    &BLACKLIST
 }
 
 // =============================================================================
@@ -228,21 +239,21 @@ pub unsafe fn is_unit_skinnable(unit: u32) -> bool {
 #[inline]
 pub unsafe fn set_target(guid: u64) {
     let func: SetTargetFn = transmute(offsets::game::SET_TARGET);
-    func(guid)
+    func(guid);
 }
 
 /// Interact with a unit (right-click)
 #[inline]
 pub unsafe fn interact_unit(pointer: u32, autoloot: i32) {
     let func: RightClickFn = transmute(offsets::game::RIGHT_CLICK_UNIT);
-    func(pointer, autoloot)
+    func(pointer, autoloot);
 }
 
 /// Interact with a game object (right-click)
 #[inline]
 pub unsafe fn interact_object(pointer: u32, autoloot: i32) {
     let func: RightClickFn = transmute(offsets::game::RIGHT_CLICK_OBJECT);
-    func(pointer, autoloot)
+    func(pointer, autoloot);
 }
 
 // =============================================================================
@@ -463,11 +474,10 @@ mod tests {
 
     #[test]
     fn test_blacklist_contains_expected_ids() {
-        let blacklist = get_blacklist();
-        assert!(blacklist.contains(&179830));
-        assert!(blacklist.contains(&179831));
-        assert!(blacklist.contains(&179785));
-        assert!(blacklist.contains(&179786));
+        assert!(is_blacklisted(179830));
+        assert!(is_blacklisted(179831));
+        assert!(is_blacklisted(179785));
+        assert!(is_blacklisted(179786));
     }
 
     #[test]
@@ -478,11 +488,10 @@ mod tests {
 
     #[test]
     fn test_blacklist_does_not_contain_other_ids() {
-        let blacklist = get_blacklist();
-        assert!(!blacklist.contains(&0));
-        assert!(!blacklist.contains(&1));
-        assert!(!blacklist.contains(&179829));
-        assert!(!blacklist.contains(&179832));
-        assert!(!blacklist.contains(&u32::MAX));
+        assert!(!is_blacklisted(0));
+        assert!(!is_blacklisted(1));
+        assert!(!is_blacklisted(179829));
+        assert!(!is_blacklisted(179832));
+        assert!(!is_blacklisted(u32::MAX));
     }
 }
