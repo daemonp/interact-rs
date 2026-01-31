@@ -25,6 +25,11 @@ jobs:
       - name: Build Release
         run: cargo build --target i686-pc-windows-gnu --release
 
+      - name: Package Interact Addon
+        run: |
+          cd AddOn
+          zip -r ../Interact.zip Interact/
+
       - name: Get version from tag
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
@@ -37,15 +42,23 @@ jobs:
           prerelease: false
           files: |
             target/i686-pc-windows-gnu/release/interact.dll
+            Interact.zip
           body: |
             ## interact-rs ${{ steps.get_version.outputs.VERSION }}
             
             Interact with nearest object keybind for World of Warcraft 1.12.1.5875 (Vanilla)
             
             ### Installation
+            
+            **DLL (required):**
             1. Place `interact.dll` in your WoW game folder
             2. Add `interact.dll` to `dlls.txt` (for VanillaFixes loader)
             3. Launch the game
+            
+            **Addon (required for keybinds):**
+            1. Extract `Interact.zip` to your `Interface/AddOns/` folder
+            2. You should have `Interface/AddOns/Interact/Interact.lua`
+            3. Enable the addon in character select
             
             ### Keybinding Setup
             After loading, two new keybindings will be available in WoW's Key Bindings menu:
