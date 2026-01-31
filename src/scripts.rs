@@ -120,8 +120,8 @@ unsafe fn find_best_candidate(lua: &crate::lua::LuaApi, l: LuaState) -> Option<(
     // Get visible objects manager
     let objects = game::get_visible_objects();
     let player_guid = game::get_player_guid(objects);
-    let player = game::get_object_pointer(player_guid);
-    let player_pos = game::get_unit_position(player);
+    let player = game::get_object_pointer(player_guid)?;
+    let player_pos = game::get_unit_position(player.get());
 
     // Candidates for each priority level
     let mut lootable = Candidate::new();
@@ -131,16 +131,25 @@ unsafe fn find_best_candidate(lua: &crate::lua::LuaApi, l: LuaState) -> Option<(
 
     // Blacklist is now lazily initialized - no allocation per call
 
-    // Iterate through all visible objects
+    // Iterate through all visible objects.
+    // The object manager uses a linked list where:
+    // - current == 0 indicates end of list (null pointer)
+    // - (current & 1) != 0 indicates an invalid/sentinel pointer
+    //   WoW uses the low bit as a tag to mark end-of-list or invalid entries,
+    //   since valid object pointers are always aligned (low bits are 0).
     let mut current = game::get_first_object(objects);
 
     while current != 0 && (current & 1) == 0 {
         let guid = game::get_object_guid(current);
-        let pointer = game::get_object_pointer(guid);
-        let obj_type = game::get_object_type(pointer);
+        let Some(pointer) = game::get_object_pointer(guid) else {
+            current = game::get_next_object(current);
+            continue;
+        };
+        let pointer_raw = pointer.get();
+        let obj_type = game::get_object_type(pointer_raw);
 
         // Skip objects summoned by players
-        if is_player_summoned(pointer) {
+        if is_player_summoned(pointer_raw) {
             current = game::get_next_object(current);
             continue;
         }
@@ -172,9 +181,9 @@ unsafe fn find_best_candidate(lua: &crate::lua::LuaApi, l: LuaState) -> Option<(
                     );
                 }
                 ObjectType::GameObject => {
-                    let id = game::get_gameobject_id(pointer);
+                    let id = game::get_gameobject_id(pointer_raw);
                     if !game::is_blacklisted(id) {
-                        gameobject.update(guid, pointer, obj_type, distance);
+                        gameobject.update(guid, pointer_raw, obj_type, distance);
                     }
                 }
                 _ => {}
@@ -207,12 +216,11 @@ unsafe fn is_player_summoned(pointer: u32) -> bool {
         return false;
     }
 
-    let summoned_by = game::get_object_pointer(summoned_by_guid);
-    if summoned_by == 0 {
+    let Some(summoned_by) = game::get_object_pointer(summoned_by_guid) else {
         return false;
-    }
+    };
 
-    game::get_object_type(summoned_by) == ObjectType::Player
+    game::get_object_type(summoned_by.get()) == ObjectType::Player
 }
 
 /// Process a unit and update the appropriate candidate
@@ -265,6 +273,8 @@ pub unsafe fn register_functions() {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)] // Exact float comparisons are intentional in these tests
+
     use super::*;
 
     // -------------------------------------------------------------------------
@@ -352,7 +362,8 @@ mod tests {
 
     #[test]
     fn test_initial_distance_is_large() {
-        assert!(INITIAL_DISTANCE > MAX_DISTANCE);
+        // Use const block for compile-time assertion
+        const _: () = assert!(INITIAL_DISTANCE > MAX_DISTANCE);
         assert_eq!(INITIAL_DISTANCE, 1000.0);
     }
 

@@ -11,6 +11,7 @@ use crate::offsets;
 use once_cell::sync::Lazy;
 use std::collections::HashSet;
 use std::mem::transmute;
+use std::num::NonZeroU32;
 
 // =============================================================================
 // Types
@@ -101,31 +102,57 @@ type RightClickFn = unsafe extern "thiscall" fn(u32, i32);
 // Memory offset helpers
 // =============================================================================
 
-/// Read a value from a memory address
+/// Read a value from a memory address.
+///
+/// # Safety
+/// - `addr` must point to valid, initialized memory within the WoW process
+/// - `addr` must be properly aligned for type `T`
+/// - The memory at `addr` must contain a valid bit pattern for `T`
+/// - The address must be a known WoW 1.12.1.5875 memory location
 #[inline]
 unsafe fn read<T: Copy>(addr: u32) -> T {
+    // SAFETY: Caller guarantees addr is a valid WoW 1.12.1 memory address.
+    // All addresses used are documented in wow_offsets_reference.md and
+    // have been verified against the 1.12.1.5875 client.
     *(addr as *const T)
 }
 
-/// Read a value at base + offset
+/// Read a value at base + offset.
+///
+/// # Safety
+/// - `base + offset` must not overflow
+/// - The resulting address must point to valid, initialized memory
+/// - The address must be properly aligned for type `T`
+/// - Used for reading fields from WoW's internal object structures
 #[inline]
 unsafe fn read_offset<T: Copy>(base: u32, offset: u32) -> T {
-    *((base + offset) as *const T)
+    // SAFETY: Caller guarantees base is a valid object pointer obtained from
+    // the game's object manager, and offset is a documented field offset.
+    // Object structure offsets are from wow_offsets_reference.md.
+    read(base + offset)
 }
 
 // =============================================================================
 // Game State
 // =============================================================================
 
-/// Check if the player is currently in the game world
+/// Check if the player is currently in the game world.
+///
+/// Reads the `IsIngame` flag at `0xB4B424`.
 #[inline]
 pub unsafe fn is_in_world() -> bool {
+    // SAFETY: IS_IN_WORLD (0xB4B424) is a static game variable that exists
+    // for the lifetime of the WoW process. See wow_offsets_reference.md: Player.IsIngame
     read::<u8>(offsets::game::IS_IN_WORLD as u32) != 0
 }
 
-/// Get the visible objects manager pointer
+/// Get the visible objects manager pointer.
+///
+/// Returns the base pointer to the object manager at `0xB41414`.
 #[inline]
 pub unsafe fn get_visible_objects() -> u32 {
+    // SAFETY: VISIBLE_OBJECTS (0xB41414) is the static object manager base pointer.
+    // See wow_offsets_reference.md: ObjectManager.ManagerBase
     read::<u32>(offsets::game::VISIBLE_OBJECTS as u32)
 }
 
@@ -133,53 +160,105 @@ pub unsafe fn get_visible_objects() -> u32 {
 // Object Accessors
 // =============================================================================
 
-/// Get a pointer to a game object by its GUID
+/// Get a pointer to a game object by its GUID.
+///
+/// Calls the game's `GetPtrForGuid` function at `0x464870`.
+/// Returns `None` if the object is not found (null pointer).
+///
+/// Using `Option<NonZeroU32>` provides:
+/// - Explicit null checking at the type level
+/// - Same memory layout as `u32` (niche optimization)
+/// - Prevents accidental use of null pointers
 #[inline]
-pub unsafe fn get_object_pointer(guid: u64) -> u32 {
+pub unsafe fn get_object_pointer(guid: u64) -> Option<NonZeroU32> {
+    // SAFETY: GET_OBJECT_POINTER (0x464870) is the game's GetPtrForGuid function.
+    // It safely returns 0 for invalid GUIDs. See wow_offsets_reference.md: Functions.GetPtrForGuid
     let func: GetObjectPointerFn = transmute(offsets::game::GET_OBJECT_POINTER);
-    func(guid)
+    NonZeroU32::new(func(guid))
 }
 
-/// Get the player's GUID from the visible objects manager
+/// Get a raw pointer to a game object by its GUID (legacy API).
+///
+/// Prefer `get_object_pointer` which returns `Option<NonZeroU32>` for type safety.
+/// This function is provided for cases where you need the raw u32 value.
+#[inline]
+#[allow(dead_code)] // Utility function for future use or external callers
+pub unsafe fn get_object_pointer_raw(guid: u64) -> u32 {
+    // SAFETY: This function's safety relies on get_object_pointer.
+    // It provides a raw u32 pointer, returning 0 for None.
+    get_object_pointer(guid).map_or(0, NonZeroU32::get)
+}
+
+/// Get the player's GUID from the visible objects manager.
+///
+/// Reads at offset `0xC0` from the object manager base.
 #[inline]
 pub unsafe fn get_player_guid(objects: u32) -> u64 {
+    // SAFETY: objects is the object manager pointer from get_visible_objects().
+    // Offset 0xC0 is PlayerGuid. See wow_offsets_reference.md: ObjectManager.PlayerGuid
     read_offset(objects, 0xC0)
 }
 
-/// Get the first object in the visible objects list
+/// Get the first object in the visible objects list.
+///
+/// Reads at offset `0xAC` from the object manager base.
 #[inline]
 pub unsafe fn get_first_object(objects: u32) -> u32 {
+    // SAFETY: objects is the object manager pointer.
+    // Offset 0xAC is FirstObj. See wow_offsets_reference.md: ObjectManager.FirstObj
     read_offset(objects, 0xAC)
 }
 
-/// Get the next object in the linked list
+/// Get the next object in the linked list.
+///
+/// Reads at offset `0x3C` from the current object.
 #[inline]
 pub unsafe fn get_next_object(current: u32) -> u32 {
+    // SAFETY: current is an object list entry pointer.
+    // Offset 0x3C is NextObj. See wow_offsets_reference.md: ObjectManager.NextObj
     read_offset(current, 0x3C)
 }
 
-/// Get the GUID of an object from its list entry
+/// Get the GUID of an object from its list entry.
+///
+/// Reads at offset `0x30` from the current object.
 #[inline]
 pub unsafe fn get_object_guid(current: u32) -> u64 {
+    // SAFETY: current is an object list entry pointer.
+    // Offset 0x30 is CurObjGuid. See wow_offsets_reference.md: ObjectManager.CurObjGuid
     read_offset(current, 0x30)
 }
 
-/// Get the object type from a pointer
+/// Get the object type from a pointer.
+///
+/// Reads at offset `0x14` from the object pointer.
 #[inline]
 pub unsafe fn get_object_type(pointer: u32) -> ObjectType {
+    // SAFETY: pointer is a valid object pointer from get_object_pointer().
+    // Offset 0x14 is ObjType. See wow_offsets_reference.md: ObjectManager.ObjType
     ObjectType::from(read_offset::<u32>(pointer, 0x14))
 }
 
-/// Get the "summoned by" GUID for an object
+/// Get the "summoned by" GUID for an object.
+///
+/// First reads the descriptor pointer at offset `0x8`, then reads
+/// the summoned-by GUID at offset `0x30` from the descriptor.
 #[inline]
 pub unsafe fn get_summoned_by_guid(pointer: u32) -> u64 {
+    // SAFETY: pointer is a valid object pointer.
+    // Offset 0x8 is DescriptorOffset, 0x30 is SummonedByGuid.
+    // See wow_offsets_reference.md: ObjectManager.DescriptorOffset, Descriptors.SummonedByGuid
     let descriptor: u32 = read_offset(pointer, 0x8);
     read_offset(descriptor, 0x30)
 }
 
-/// Get the game object ID
+/// Get the game object ID.
+///
+/// Reads at offset `0x294` from the object pointer.
 #[inline]
 pub unsafe fn get_gameobject_id(pointer: u32) -> u32 {
+    // SAFETY: pointer is a valid GameObject pointer.
+    // Offset 0x294 contains the game object's entry ID.
     read_offset(pointer, 0x294)
 }
 
@@ -187,9 +266,14 @@ pub unsafe fn get_gameobject_id(pointer: u32) -> u32 {
 // Unit Functions
 // =============================================================================
 
-/// Get the position of a unit
+/// Get the position of a unit.
+///
+/// Reads X/Y/Z coordinates from offsets `0x9B8`/`0x9BC`/`0x9C0`.
+/// Note: WoW uses Y, X, Z order in memory.
 #[inline]
 pub unsafe fn get_unit_position(unit: u32) -> C3Vector {
+    // SAFETY: unit is a valid unit pointer from the object list.
+    // Offsets are from wow_offsets_reference.md: Unit.PosX/PosY/PosZ
     C3Vector {
         y: read_offset(unit, 0x09B8),
         x: read_offset(unit, 0x09BC),
@@ -197,9 +281,15 @@ pub unsafe fn get_unit_position(unit: u32) -> C3Vector {
     }
 }
 
-/// Get the position of a game object
+/// Get the position of a game object.
+///
+/// First reads a position structure pointer at offset `0x110`, then
+/// reads the coordinates from that structure.
 #[inline]
 pub unsafe fn get_object_position(pointer: u32) -> C3Vector {
+    // SAFETY: pointer is a valid GameObject pointer.
+    // Offset 0x110 points to a position structure.
+    // The position structure has Y/X/Z at offsets 0x24/0x28/0x2C.
     let pos_ptr: u32 = read_offset(pointer, 0x110);
     C3Vector {
         y: read_offset(pos_ptr, 0x24),
@@ -208,24 +298,41 @@ pub unsafe fn get_object_position(pointer: u32) -> C3Vector {
     }
 }
 
-/// Get the health of a unit
+/// Get the health of a unit.
+///
+/// Reads health from the unit's descriptor at offset `0x58`.
 #[inline]
 pub unsafe fn get_unit_health(unit: u32) -> i32 {
+    // SAFETY: unit is a valid unit pointer.
+    // Offset 0x8 is DescriptorOffset, 0x58 is Health.
+    // See wow_offsets_reference.md: Descriptors.Health
     let descriptor: u32 = read_offset(unit, 0x8);
     read_offset(descriptor, 0x58)
 }
 
-/// Check if a unit is lootable (has loot flag set)
+/// Check if a unit is lootable (has loot flag set).
+///
+/// Checks bit 0 of the DynamicFlags at descriptor offset `0x23C`.
 #[inline]
 pub unsafe fn is_unit_lootable(unit: u32) -> bool {
+    // SAFETY: unit is a valid unit pointer.
+    // Offset 0x8 is DescriptorOffset, 0x23C is DynamicFlags.
+    // Bit 0 of DynamicFlags indicates lootable.
+    // See wow_offsets_reference.md: Descriptors.DynamicFlags
     let descriptor: u32 = read_offset(unit, 0x8);
     let flags: i32 = read_offset(descriptor, 0x23C);
     (flags & 0x1) != 0
 }
 
-/// Check if a unit is skinnable
+/// Check if a unit is skinnable.
+///
+/// Checks bit 26 (`0x0400_0000`) of Flags at descriptor offset `0xB8`.
 #[inline]
 pub unsafe fn is_unit_skinnable(unit: u32) -> bool {
+    // SAFETY: unit is a valid unit pointer.
+    // Offset 0x8 is DescriptorOffset, 0xB8 is Flags.
+    // Bit 26 (0x04000000) indicates skinnable.
+    // See wow_offsets_reference.md: Descriptors.Flags
     let descriptor: u32 = read_offset(unit, 0x8);
     let flags: i32 = read_offset(descriptor, 0xB8);
     (flags & 0x0400_0000) != 0
@@ -235,23 +342,38 @@ pub unsafe fn is_unit_skinnable(unit: u32) -> bool {
 // Interaction Functions
 // =============================================================================
 
-/// Set the current target by GUID
+/// Set the current target by GUID.
+///
+/// Calls the game's `SetTarget` function at `0x493540`.
 #[inline]
 pub unsafe fn set_target(guid: u64) {
+    // SAFETY: SET_TARGET (0x493540) is the game's SetTarget function.
+    // It handles invalid GUIDs gracefully (clears target).
+    // See wow_offsets_reference.md: Functions.SetTarget
     let func: SetTargetFn = transmute(offsets::game::SET_TARGET);
     func(guid);
 }
 
-/// Interact with a unit (right-click)
+/// Interact with a unit (right-click).
+///
+/// Calls the game's `OnRightClickUnit` function at `0x60BEA0`.
 #[inline]
 pub unsafe fn interact_unit(pointer: u32, autoloot: i32) {
+    // SAFETY: RIGHT_CLICK_UNIT (0x60BEA0) is OnRightClickUnit.
+    // pointer must be a valid unit pointer from get_object_pointer().
+    // See wow_offsets_reference.md: Functions.OnRightClickUnit
     let func: RightClickFn = transmute(offsets::game::RIGHT_CLICK_UNIT);
     func(pointer, autoloot);
 }
 
-/// Interact with a game object (right-click)
+/// Interact with a game object (right-click).
+///
+/// Calls the game's `OnRightClickObject` function at `0x5F8660`.
 #[inline]
 pub unsafe fn interact_object(pointer: u32, autoloot: i32) {
+    // SAFETY: RIGHT_CLICK_OBJECT (0x5F8660) is OnRightClickObject.
+    // pointer must be a valid GameObject pointer from get_object_pointer().
+    // See wow_offsets_reference.md: Functions.OnRightClickObject
     let func: RightClickFn = transmute(offsets::game::RIGHT_CLICK_OBJECT);
     func(pointer, autoloot);
 }
@@ -262,6 +384,8 @@ pub unsafe fn interact_object(pointer: u32, autoloot: i32) {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)] // Exact float comparisons are intentional in these tests
+
     use super::*;
 
     // -------------------------------------------------------------------------
