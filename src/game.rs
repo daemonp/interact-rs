@@ -129,7 +129,7 @@ unsafe fn read_offset<T: Copy>(base: u32, offset: u32) -> T {
     // SAFETY: Caller guarantees base is a valid object pointer obtained from
     // the game's object manager, and offset is a documented field offset.
     // Object structure offsets are from wow_offsets_reference.md.
-    *((base + offset) as *const T)
+    read(base + offset)
 }
 
 // =============================================================================
@@ -184,9 +184,9 @@ pub unsafe fn get_object_pointer(guid: u64) -> Option<NonZeroU32> {
 #[inline]
 #[allow(dead_code)] // Utility function for future use or external callers
 pub unsafe fn get_object_pointer_raw(guid: u64) -> u32 {
-    // SAFETY: Same as get_object_pointer
-    let func: GetObjectPointerFn = transmute(offsets::game::GET_OBJECT_POINTER);
-    func(guid)
+    // SAFETY: This function's safety relies on get_object_pointer.
+    // It provides a raw u32 pointer, returning 0 for None.
+    get_object_pointer(guid).map_or(0, NonZeroU32::get)
 }
 
 /// Get the player's GUID from the visible objects manager.
