@@ -13,9 +13,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 // Version Information
 // =============================================================================
 
-pub const MAJOR_VERSION: u32 = 1;
-pub const MINOR_VERSION: u32 = 2;
-pub const PATCH_VERSION: u32 = 0;
+/// Version string extracted from Cargo.toml at compile time.
+/// Format: "MAJOR.MINOR.PATCH" (e.g., "1.2.0")
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // =============================================================================
 // Function Type Definitions
@@ -59,12 +59,7 @@ fn sys_msg_init_detour() {
     // Initialize logging (safe to do file I/O now, we're past DllMain)
     crate::logging::init();
 
-    debug_log!(
-        "=== interact-rs v{}.{}.{} ===",
-        MAJOR_VERSION,
-        MINOR_VERSION,
-        PATCH_VERSION
-    );
+    debug_log!("=== interact-rs v{} ===", VERSION);
     debug_log!("SysMsgInitialize called - initializing hooks");
 
     // Initialize all other hooks
