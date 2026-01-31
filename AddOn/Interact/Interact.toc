@@ -2,7 +2,7 @@
 ## Title: Interact
 ## Author: interact-rs contributors
 ## Notes: Interact with nearest object keybind for Vanilla WoW
-## Version: 1.0.0
+## Version: 1.2.0
 
 Interact.lua
 Bindings.xml

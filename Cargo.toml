@@ -1,6 +1,6 @@
 [package]
 name = "interact"
-version = "1.0.0"
+version = "1.2.0"
 edition = "2021"
 authors = ["interact contributors"]
 description = "Interact with nearest object keybind for World of Warcraft 1.12.1.5875 - Rust port"
